@@ -144,6 +144,8 @@ const CONF_GET_DESCRIPTION = `Read any Confluence data. Returns TOON format by d
 - \`/wiki/api/v2/pages/{id}/body\` - get page body (\`body-format\`: storage, atlas_doc_format, view)
 - \`/wiki/rest/api/search\` - search content (\`cql\` query param)
 
+**Round-trip editing:** When reading a page to modify and write back, use \`body-format: "storage"\` to get Confluence storage format. This preserves \`<ac:image>\`, \`<ac:structured-macro>\`, and other Confluence-specific XML elements needed for correct rendering.
+
 **JQ examples:** \`results[*].id\`, \`results[0]\`, \`results[*].{id: id, title: title}\`
 
 API reference: https://developer.atlassian.com/cloud/confluence/rest/v2/`;
@@ -187,6 +189,8 @@ const CONF_PUT_DESCRIPTION = `Replace Confluence resources (full update). Return
 2. **Update blog post:** \`/wiki/api/v2/blogposts/{id}\`
 
 Note: PUT replaces entire resource. Version number must be incremented.
+
+**Image handling:** When updating with \`representation: "storage"\`, any \`<img>\` tags pointing to Confluence attachment URLs are automatically converted back to \`<ac:image>\` macros for correct rendering.
 
 API reference: https://developer.atlassian.com/cloud/confluence/rest/v2/`;
 

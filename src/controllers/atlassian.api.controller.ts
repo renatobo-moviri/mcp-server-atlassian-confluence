@@ -7,6 +7,7 @@ import {
 	RequestWithBodyArgsType,
 } from '../tools/atlassian.api.types.js';
 import { applyJqFilter, toOutputString } from '../utils/jq.util.js';
+import { preprocessStorageBody } from '../utils/confluence-storage.util.js';
 
 /**
  * @namespace AtlassianApiController
@@ -64,13 +65,20 @@ async function handleRequest(
 			...(options.body && { bodyKeys: Object.keys(options.body) }),
 		});
 
+		// For write operations, fix <img> tags that should be <ac:image> macros
+		// in storage format content (round-trip editing fix)
+		const body =
+			options.body && (method === 'PUT' || method === 'POST')
+				? preprocessStorageBody(options.body)
+				: options.body;
+
 		// Call the service layer (returns TransportResponse with data and rawResponsePath)
 		const response = await atlassianApiService.request<unknown>(
 			options.path,
 			{
 				method,
 				queryParams: options.queryParams,
-				body: options.body,
+				body,
 			},
 		);
 
