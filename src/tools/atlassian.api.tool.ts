@@ -8,6 +8,8 @@ import {
 	RequestWithBodyArgs,
 	type RequestWithBodyArgsType,
 	DeleteApiToolArgs,
+	AttachApiToolArgs,
+	type AttachApiToolArgsType,
 } from './atlassian.api.types.js';
 import {
 	handleGet,
@@ -15,6 +17,7 @@ import {
 	handlePut,
 	handlePatch,
 	handleDelete,
+	handleAttach,
 } from '../controllers/atlassian.api.controller.js';
 
 // Create a contextualized logger for this file
@@ -123,6 +126,39 @@ const put = createWriteHandler('PUT', handlePut);
 const patch = createWriteHandler('PATCH', handlePatch);
 const del = createReadHandler('DELETE', handleDelete);
 
+/**
+ * MCP tool handler for uploading a local file as a page attachment.
+ * Uses a dedicated arg shape (pageId/filePath/comment) rather than path/body.
+ */
+const attach = async (args: Record<string, unknown>) => {
+	const methodLogger = Logger.forContext(
+		'tools/atlassian.api.tool.ts',
+		'attach',
+	);
+	methodLogger.debug('Uploading attachment with args:', {
+		pageId: args.pageId,
+		filePath: args.filePath,
+	});
+
+	try {
+		const result = await handleAttach(args as AttachApiToolArgsType);
+
+		methodLogger.debug('Successfully received response from controller');
+
+		return {
+			content: [
+				{
+					type: 'text' as const,
+					text: truncateForAI(result.content, result.rawResponsePath),
+				},
+			],
+		};
+	} catch (error) {
+		methodLogger.error('Failed to upload attachment', error);
+		return formatErrorForMcpTool(error);
+	}
+};
+
 // Tool descriptions
 const CONF_GET_DESCRIPTION = `Read any Confluence data. Returns TOON format by default (30-60% fewer tokens than JSON).
 
@@ -170,7 +206,27 @@ const CONF_POST_DESCRIPTION = `Create Confluence resources. Returns TOON format 
 
 4. **Add comment:** \`/wiki/api/v2/pages/{id}/footer-comments\`
 
+**File uploads:** This tool is JSON-only and cannot upload files. To attach a local file (image, PDF, etc.) to a page, use the \`conf_attach\` tool instead.
+
 API reference: https://developer.atlassian.com/cloud/confluence/rest/v2/`;
+
+const CONF_ATTACH_DESCRIPTION = `Upload a local file to a Confluence page as an attachment (create-or-update by filename). Returns TOON format by default.
+
+Reads the file from the filesystem of the machine running the MCP server (\`filePath\` is an absolute or CWD-relative path), so binary data never passes through the model context. If an attachment with the same filename already exists on the page it is updated in place (new version); otherwise a new attachment is created. The response includes a \`status\` field of \`"created"\` or \`"updated"\`.
+
+**Why this tool:** \`conf_post\`/\`conf_put\` are JSON-only and CANNOT upload files. Use \`conf_attach\` for any binary/file upload (images, PDFs, etc.).
+
+**Arguments:**
+- \`pageId\` - target page ID (e.g., "456789")
+- \`filePath\` - path to the local file (e.g., "./diagram.png")
+- \`comment\` - optional attachment version comment
+- \`jq\` / \`outputFormat\` - standard response formatting (default compact \`{id, title, status, fileSize}\`)
+
+**Embedding in the page body is a separate step:** uploading only attaches the file. To display it, fetch the page body with \`conf_get\` (\`body-format: "storage"\`), insert \`<ac:image><ri:attachment ri:filename="name.png" /></ac:image>\` referencing the attachment by filename, then write it back with \`conf_put\`.
+
+**Deleting an attachment:** use \`conf_delete\` with \`/wiki/api/v2/attachments/{id}\`.
+
+Note: The server may run in HTTP transport mode; \`filePath\` is always read from the server's filesystem.`;
 
 const CONF_PUT_DESCRIPTION = `Replace Confluence resources (full update). Returns TOON format by default.
 
@@ -290,6 +346,17 @@ function registerTools(server: McpServer) {
 			inputSchema: DeleteApiToolArgs,
 		},
 		del,
+	);
+
+	// Register the attachment upload tool using modern registerTool API
+	server.registerTool(
+		'conf_attach',
+		{
+			title: 'Confluence Upload Attachment',
+			description: CONF_ATTACH_DESCRIPTION,
+			inputSchema: AttachApiToolArgs,
+		},
+		attach,
 	);
 
 	registerLogger.debug('Successfully registered API tools');

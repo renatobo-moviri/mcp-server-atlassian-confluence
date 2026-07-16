@@ -133,7 +133,7 @@ The server will automatically load these values from:
 
 ## Available Tools
 
-This MCP server provides 5 generic tools that can access any Confluence API endpoint:
+This MCP server provides 6 generic tools that can access any Confluence API endpoint:
 
 | Tool | Description |
 |------|-------------|
@@ -142,6 +142,7 @@ This MCP server provides 5 generic tools that can access any Confluence API endp
 | `conf_put` | PUT to any endpoint (replace resources) |
 | `conf_patch` | PATCH to any endpoint (partial updates) |
 | `conf_delete` | DELETE from any endpoint (remove resources) |
+| `conf_attach` | Upload a local file to a page as an attachment (create-or-update) |
 
 ### Tool Parameters
 
