@@ -108,3 +108,51 @@ export type PatchApiToolArgsType = RequestWithBodyArgsType;
  */
 export const DeleteApiToolArgs = GetApiToolArgs;
 export type DeleteApiToolArgsType = GetApiToolArgsType;
+
+/**
+ * Schema for conf_attach tool arguments (upload a local file as a page attachment).
+ * The endpoint is fixed, so there is no `path`/`queryParams`; the shared
+ * `jq`/`outputFormat` response-formatting fields are reused.
+ */
+export const AttachApiToolArgs = z.object({
+	/**
+	 * ID of the target Confluence page
+	 */
+	pageId: z
+		.string()
+		.min(1, 'pageId is required')
+		.describe(
+			'numeric ID of the target Confluence page (e.g., "456789"). Required.',
+		),
+
+	/**
+	 * Path to the local file to upload, read from the server's filesystem
+	 */
+	filePath: z
+		.string()
+		.min(1, 'filePath is required')
+		.describe(
+			'absolute or CWD-relative path to the local file to upload, read from the filesystem of the machine running the MCP server (e.g., "./diagram.png"). Required.',
+		),
+
+	/**
+	 * Optional attachment version comment
+	 */
+	comment: z
+		.string()
+		.optional()
+		.describe(
+			'optional attachment version comment (shown in the attachment history).',
+		),
+
+	/**
+	 * Optional JMESPath expression to filter/transform the response
+	 */
+	jq: BaseApiToolArgs.jq,
+
+	/**
+	 * Output format for the response
+	 */
+	outputFormat: OutputFormat,
+});
+export type AttachApiToolArgsType = z.infer<typeof AttachApiToolArgs>;

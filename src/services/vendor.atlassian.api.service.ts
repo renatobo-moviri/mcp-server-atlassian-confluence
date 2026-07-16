@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Logger } from '../utils/logger.util.js';
 import {
 	fetchAtlassian,
@@ -5,7 +7,11 @@ import {
 	AtlassianCredentials,
 	TransportResponse,
 } from '../utils/transport.util.js';
-import { createAuthMissingError, McpError } from '../utils/error.util.js';
+import {
+	createApiError,
+	createAuthMissingError,
+	McpError,
+} from '../utils/error.util.js';
 
 /**
  * @namespace VendorAtlassianApiService
@@ -248,6 +254,146 @@ export async function del<T = unknown>(
 	return request<T>(path, { method: 'DELETE', queryParams });
 }
 
+/**
+ * Minimal mapping of common file extensions to MIME types for attachment
+ * uploads. Confluence infers the content type from the multipart part, so a
+ * reasonable value keeps images/PDFs rendering correctly; anything unknown
+ * falls back to a generic binary type.
+ */
+const ATTACHMENT_MIME_TYPES: Record<string, string> = {
+	'.png': 'image/png',
+	'.jpg': 'image/jpeg',
+	'.jpeg': 'image/jpeg',
+	'.gif': 'image/gif',
+	'.svg': 'image/svg+xml',
+	'.webp': 'image/webp',
+	'.pdf': 'application/pdf',
+};
+
+/**
+ * Result of an attachment upload operation
+ */
+export interface UploadAttachmentResult {
+	/** The normalized attachment object returned by the Confluence API */
+	attachment: Record<string, unknown>;
+	/** Whether the attachment was newly created or an existing one updated */
+	status: 'created' | 'updated';
+	/** Path to the saved raw API response, if any */
+	rawResponsePath: string | null;
+}
+
+/**
+ * Uploads a local file to a Confluence page as an attachment with
+ * create-or-update (upsert) semantics.
+ *
+ * The file is read from the filesystem of the machine running the MCP server
+ * (never from the model context). If an attachment with the same filename
+ * already exists on the page it is updated in place; otherwise a new
+ * attachment is created.
+ *
+ * @param pageId - ID of the target Confluence page
+ * @param filePath - Absolute or CWD-relative path to the file to upload
+ * @param comment - Optional attachment version comment
+ * @returns The normalized attachment object, upsert status, and raw response path
+ * @throws {McpError} If credentials are missing, the file cannot be read
+ *                    (thrown before any network call), or the API request fails
+ *
+ * @example
+ * const result = await uploadAttachment('123456', './diagram.png', 'v2 update');
+ * // result.status === 'created' | 'updated'
+ */
+export async function uploadAttachment(
+	pageId: string,
+	filePath: string,
+	comment?: string,
+): Promise<UploadAttachmentResult> {
+	const methodLogger = Logger.forContext(
+		'services/vendor.atlassian.api.service.ts',
+		'uploadAttachment',
+	);
+
+	// Validate credentials up-front
+	const credentials = validateCredentials();
+
+	// Resolve the path against CWD and read the file BEFORE any network call so
+	// a missing/unreadable file fails fast with a clear message.
+	const resolvedPath = path.resolve(filePath);
+	let fileBuffer: Buffer;
+	try {
+		fileBuffer = await readFile(resolvedPath);
+	} catch (error) {
+		methodLogger.error(`Failed to read attachment file: ${resolvedPath}`);
+		throw createApiError(
+			`Attachment file not found or unreadable: ${resolvedPath}`,
+			400,
+			error,
+		);
+	}
+
+	const filename = path.basename(resolvedPath);
+	const extension = path.extname(resolvedPath).toLowerCase();
+	const mimeType =
+		ATTACHMENT_MIME_TYPES[extension] || 'application/octet-stream';
+
+	methodLogger.debug(
+		`Uploading "${filename}" (${mimeType}, ${fileBuffer.length} bytes) to page ${pageId}`,
+	);
+
+	// Check whether an attachment with this filename already exists on the page
+	const baseAttachmentPath = `/wiki/rest/api/content/${pageId}/child/attachment`;
+	const checkPath = appendQueryParams(baseAttachmentPath, { filename });
+	const existing = await fetchAtlassian<{
+		results?: Array<{ id?: string }>;
+	}>(credentials, checkPath, { method: 'GET' });
+	const existingId = existing.data?.results?.[0]?.id;
+	const status: 'created' | 'updated' = existingId ? 'updated' : 'created';
+
+	methodLogger.debug(
+		existingId
+			? `Existing attachment ${existingId} found; updating`
+			: 'No existing attachment found; creating',
+	);
+
+	// Build the multipart body
+	const formData = new FormData();
+	const blob = new Blob([fileBuffer], { type: mimeType });
+	formData.append('file', blob, filename);
+	if (comment) {
+		formData.append('comment', comment);
+	}
+	formData.append('minorEdit', 'true');
+
+	// Route to the create or update endpoint per the upsert decision
+	const uploadPath = existingId
+		? `${baseAttachmentPath}/${existingId}/data`
+		: baseAttachmentPath;
+
+	const response = await fetchAtlassian<Record<string, unknown>>(
+		credentials,
+		uploadPath,
+		{
+			method: 'POST',
+			body: formData,
+			headers: { 'X-Atlassian-Token': 'nocheck' },
+		},
+	);
+
+	// Normalize the response: the create endpoint returns { results: [...] }
+	// while the update endpoint returns the attachment object directly.
+	const data = response.data as Record<string, unknown>;
+	const results = data?.results;
+	const attachment =
+		Array.isArray(results) && results.length > 0
+			? (results[0] as Record<string, unknown>)
+			: data;
+
+	return {
+		attachment,
+		status,
+		rawResponsePath: response.rawResponsePath,
+	};
+}
+
 export default {
 	request,
 	get,
@@ -255,6 +401,7 @@ export default {
 	put,
 	patch,
 	del,
+	uploadAttachment,
 	validateCredentials,
 	normalizePath,
 	appendQueryParams,

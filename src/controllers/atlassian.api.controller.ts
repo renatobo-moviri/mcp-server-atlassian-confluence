@@ -3,10 +3,12 @@ import { Logger } from '../utils/logger.util.js';
 import { handleControllerError } from '../utils/error-handler.util.js';
 import { ControllerResponse } from '../types/common.types.js';
 import {
+	AttachApiToolArgsType,
 	GetApiToolArgsType,
 	RequestWithBodyArgsType,
 } from '../tools/atlassian.api.types.js';
 import { applyJqFilter, toOutputString } from '../utils/jq.util.js';
+import { preprocessStorageBody } from '../utils/confluence-storage.util.js';
 
 /**
  * @namespace AtlassianApiController
@@ -64,13 +66,20 @@ async function handleRequest(
 			...(options.body && { bodyKeys: Object.keys(options.body) }),
 		});
 
+		// For write operations, fix <img> tags that should be <ac:image> macros
+		// in storage format content (round-trip editing fix)
+		const body =
+			options.body && (method === 'PUT' || method === 'POST')
+				? preprocessStorageBody(options.body)
+				: options.body;
+
 		// Call the service layer (returns TransportResponse with data and rawResponsePath)
 		const response = await atlassianApiService.request<unknown>(
 			options.path,
 			{
 				method,
 				queryParams: options.queryParams,
-				body: options.body,
+				body,
 			},
 		);
 
@@ -155,4 +164,70 @@ export async function handleDelete(
 	options: GetApiToolArgsType,
 ): Promise<ControllerResponse> {
 	return handleRequest('DELETE', options);
+}
+
+/**
+ * Upload a local file to a Confluence page as an attachment (create-or-update).
+ *
+ * @param options - Options containing pageId, filePath, optional comment, and jq/outputFormat
+ * @returns Promise with formatted response content
+ */
+export async function handleAttach(
+	options: AttachApiToolArgsType,
+): Promise<ControllerResponse> {
+	const methodLogger = logger.forMethod('handleAttach');
+
+	try {
+		methodLogger.debug('Uploading attachment', {
+			pageId: options.pageId,
+			filePath: options.filePath,
+		});
+
+		// Call the service layer (reads the file and performs the upsert)
+		const { attachment, status, rawResponsePath } =
+			await atlassianApiService.uploadAttachment(
+				options.pageId,
+				options.filePath,
+				options.comment,
+			);
+
+		methodLogger.debug(`Attachment ${status} successfully`);
+
+		// When a jq filter is supplied, run it against the full attachment
+		// object augmented with the upsert status. Otherwise return a compact
+		// summary since raw attachment payloads are verbose.
+		let result: unknown;
+		if (options.jq) {
+			result = applyJqFilter({ ...attachment, status }, options.jq);
+		} else {
+			const extensions = attachment.extensions as
+				| Record<string, unknown>
+				| undefined;
+			result = {
+				id: attachment.id,
+				title: attachment.title,
+				status,
+				fileSize: extensions?.fileSize ?? attachment.fileSize,
+			};
+		}
+
+		// Convert to output format (TOON by default, JSON if requested)
+		const useToon = options.outputFormat !== 'json';
+		const content = await toOutputString(result, useToon);
+
+		return {
+			content,
+			rawResponsePath,
+		};
+	} catch (error) {
+		throw handleControllerError(error, {
+			entityType: 'API',
+			operation: 'attach',
+			source: 'controllers/atlassian.api.controller.ts@handleAttach',
+			additionalInfo: {
+				pageId: options.pageId,
+				filePath: options.filePath,
+			},
+		});
+	}
 }

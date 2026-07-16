@@ -1,4 +1,9 @@
-import { getAtlassianCredentials, fetchAtlassian } from './transport.util.js';
+import { jest } from '@jest/globals';
+import {
+	getAtlassianCredentials,
+	fetchAtlassian,
+	type AtlassianCredentials,
+} from './transport.util.js';
 import { config } from './config.util.js';
 import { McpError } from './error.util.js';
 
@@ -203,5 +208,110 @@ describe('Transport Utility', () => {
 				expect(error).toBeInstanceOf(McpError);
 			}
 		}, 15000);
+	});
+
+	// These tests run against a mocked global fetch (no live credentials needed),
+	// covering the multipart/FormData branch and confirming the JSON path is
+	// unchanged for existing callers.
+	describe('fetchAtlassian body handling (mocked fetch)', () => {
+		const fakeCredentials: AtlassianCredentials = {
+			siteName: 'example',
+			userEmail: 'user@example.com',
+			apiToken: 'test-token',
+		};
+
+		let originalFetch: typeof global.fetch;
+
+		const buildOkResponse = (body: unknown) => ({
+			ok: true,
+			status: 200,
+			statusText: 'OK',
+			headers: new Headers(),
+			text: async () => JSON.stringify(body),
+		});
+
+		beforeEach(() => {
+			originalFetch = global.fetch;
+		});
+
+		afterEach(() => {
+			global.fetch = originalFetch;
+		});
+
+		it('should pass a FormData body through un-stringified without a Content-Type header', async () => {
+			const fetchMock = jest
+				.fn<typeof fetch>()
+				.mockResolvedValue(buildOkResponse({ id: 'att1' }) as Response);
+			global.fetch = fetchMock as unknown as typeof fetch;
+
+			const formData = new FormData();
+			formData.append('file', new Blob([Buffer.from('hello')]), 'a.png');
+
+			await fetchAtlassian(fakeCredentials, '/wiki/rest/api/upload', {
+				method: 'POST',
+				body: formData,
+				headers: { 'X-Atlassian-Token': 'nocheck' },
+			});
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+
+			// The FormData instance is passed straight through (not stringified)
+			expect(requestInit.body).toBe(formData);
+
+			const headers = requestInit.headers as Record<string, string>;
+			// fetch must set the multipart boundary itself, so no Content-Type here
+			expect(headers['Content-Type']).toBeUndefined();
+			// Auth and Accept are still present
+			expect(headers.Authorization).toMatch(/^Basic /);
+			expect(headers.Accept).toBe('application/json');
+			// Caller-supplied headers still merge in
+			expect(headers['X-Atlassian-Token']).toBe('nocheck');
+		});
+
+		it('should drop a caller-supplied Content-Type for FormData bodies', async () => {
+			const fetchMock = jest
+				.fn<typeof fetch>()
+				.mockResolvedValue(buildOkResponse({ id: 'att1' }) as Response);
+			global.fetch = fetchMock as unknown as typeof fetch;
+
+			const formData = new FormData();
+			formData.append('file', new Blob([Buffer.from('x')]), 'b.png');
+
+			await fetchAtlassian(fakeCredentials, '/wiki/rest/api/upload', {
+				method: 'POST',
+				body: formData,
+				headers: { 'Content-Type': 'multipart/form-data' },
+			});
+
+			const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+			const headers = requestInit.headers as Record<string, string>;
+			expect(headers['Content-Type']).toBeUndefined();
+		});
+
+		it('should keep the JSON path unchanged (stringified body, JSON Content-Type)', async () => {
+			const fetchMock = jest
+				.fn<typeof fetch>()
+				.mockResolvedValue(
+					buildOkResponse({ id: 'page1' }) as Response,
+				);
+			global.fetch = fetchMock as unknown as typeof fetch;
+
+			const body = { title: 'Test', nested: { a: 1 } };
+
+			await fetchAtlassian(fakeCredentials, '/wiki/api/v2/pages', {
+				method: 'POST',
+				body,
+			});
+
+			const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+			// Body is JSON.stringify'd exactly as before
+			expect(requestInit.body).toBe(JSON.stringify(body));
+
+			const headers = requestInit.headers as Record<string, string>;
+			expect(headers['Content-Type']).toBe('application/json');
+			expect(headers.Accept).toBe('application/json');
+			expect(headers.Authorization).toMatch(/^Basic /);
+		});
 	});
 });

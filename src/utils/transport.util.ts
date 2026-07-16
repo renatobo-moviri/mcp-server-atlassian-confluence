@@ -88,19 +88,36 @@ export async function fetchAtlassian<T>(
 	const baseUrl = `https://${siteName}.atlassian.net`;
 	const url = `${baseUrl}${normalizedPath}`;
 
+	// Detect multipart uploads: when the caller passes a FormData body we must
+	// hand it to fetch un-stringified and let fetch/undici set the
+	// `Content-Type: multipart/form-data; boundary=...` header itself. Setting
+	// Content-Type manually would clobber the auto-generated boundary.
+	const isFormData =
+		typeof FormData !== 'undefined' && options.body instanceof FormData;
+
 	// Set up authentication and headers
-	const headers = {
+	const headers: Record<string, string> = {
 		Authorization: `Basic ${Buffer.from(`${userEmail}:${apiToken}`).toString('base64')}`,
 		'Content-Type': 'application/json',
 		Accept: 'application/json',
 		...options.headers,
 	};
 
+	// For multipart bodies, drop any Content-Type (including a caller-supplied
+	// one) so fetch can inject the correct multipart boundary.
+	if (isFormData) {
+		delete headers['Content-Type'];
+	}
+
 	// Prepare request options
 	const requestOptions: RequestInit = {
 		method: options.method || 'GET',
 		headers,
-		body: options.body ? JSON.stringify(options.body) : undefined,
+		body: options.body
+			? isFormData
+				? (options.body as FormData)
+				: JSON.stringify(options.body)
+			: undefined,
 	};
 
 	fetchLogger.debug(`Calling Atlassian API: ${url}`);
