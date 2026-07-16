@@ -138,9 +138,7 @@ describe('confluence-storage.util', () => {
 				version: { number: 2 },
 			};
 			preprocessStorageBody(body);
-			expect(
-				(body.body as Record<string, unknown>).value,
-			).toBe(
+			expect((body.body as Record<string, unknown>).value).toBe(
 				'<p><ac:image ac:width="500"><ri:attachment ri:filename="pic.png"/></ac:image></p>',
 			);
 		});
@@ -179,7 +177,9 @@ describe('confluence-storage.util', () => {
 
 		test('handles null/undefined body', () => {
 			expect(
-				preprocessStorageBody(null as unknown as Record<string, unknown>),
+				preprocessStorageBody(
+					null as unknown as Record<string, unknown>,
+				),
 			).toBe(null);
 		});
 

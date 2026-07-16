@@ -27,7 +27,10 @@ const IMG_TAG_RE = /<img\b([^>]*)\/?>(?:<\/img>)?/gi;
  */
 function getAttr(attrs: string, name: string): string | null {
 	// Match both single and double quoted attribute values, and unquoted values
-	const re = new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))`, 'i');
+	const re = new RegExp(
+		`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(\\S+))`,
+		'i',
+	);
 	const m = re.exec(attrs);
 	if (!m) return null;
 	return m[1] ?? m[2] ?? m[3] ?? null;
