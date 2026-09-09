@@ -289,6 +289,37 @@ describe('Transport Utility', () => {
 			expect(headers['Content-Type']).toBeUndefined();
 		});
 
+		it.each([['content-type'], ['CONTENT-TYPE'], ['Content-type']])(
+			'should drop a caller-supplied %s for FormData bodies (header names are case-insensitive)',
+			async (headerName) => {
+				const fetchMock = jest
+					.fn<typeof fetch>()
+					.mockResolvedValue(
+						buildOkResponse({ id: 'att1' }) as Response,
+					);
+				global.fetch = fetchMock as unknown as typeof fetch;
+
+				const formData = new FormData();
+				formData.append('file', new Blob([Buffer.from('x')]), 'c.png');
+
+				await fetchAtlassian(fakeCredentials, '/wiki/rest/api/upload', {
+					method: 'POST',
+					body: formData,
+					headers: { [headerName]: 'multipart/form-data' },
+				});
+
+				const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+				const headers = requestInit.headers as Record<string, string>;
+
+				// No spelling of content-type may survive, or fetch cannot set
+				// the multipart boundary and the upload fails server-side.
+				const surviving = Object.keys(headers).filter(
+					(k) => k.toLowerCase() === 'content-type',
+				);
+				expect(surviving).toEqual([]);
+			},
+		);
+
 		it('should keep the JSON path unchanged (stringified body, JSON Content-Type)', async () => {
 			const fetchMock = jest
 				.fn<typeof fetch>()
