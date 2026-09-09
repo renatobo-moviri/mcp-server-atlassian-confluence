@@ -16,12 +16,12 @@ is deliberately deferred. Still nothing filed upstream. See the per-point status
 
 | Point | Status | Commit |
 |---|---|---|
-| 1. Stringified body rejected | Fixed | `6eaab6d` |
-| 2. Watcher notification cannot be suppressed | Documented | `fe659cf` |
+| 1. Stringified body rejected | Fixed | `8627905` |
+| 2. Watcher notification cannot be suppressed | Documented | `1a22af2` |
 | 3. Pre-write check for dropped macros | Deferred - needs a design decision | - |
 
 One bug not in these notes was found while implementing them and fixed in the same branch
-(`3969ef6`): `convertImgToAcImage` interpolated the attachment filename into `ri:filename="..."`
+(`d74b7eb`): `convertImgToAcImage` interpolated the attachment filename into `ri:filename="..."`
 without XML escaping. The same commit wraps `decodeURIComponent` against malformed percent
 sequences and stops `IMG_TAG_RE` swallowing a self-closing slash into the last unquoted
 attribute. See point 4 below for what that unescaped output actually does against the live API -
@@ -31,7 +31,7 @@ it is **not** the 400 the code review predicted.
 
 ## 1. A stringified body is rejected before the request is ever made
 
-> **Fixed** in `6eaab6d`. The `z.preprocess` form below was applied as written, with the
+> **Fixed** in `8627905`. The `z.preprocess` form below was applied as written, with the
 > `.describe()` text extended to mention that a JSON-encoded string is accepted. Covered by
 > the new `src/tools/atlassian.api.types.test.ts`; the behavior table below was reproduced
 > exactly. The inferred output type and the advertised JSON schema are unchanged.
@@ -97,7 +97,7 @@ yields.
 
 ## 2. Watcher notifications cannot be suppressed, and the tool description should say so
 
-> **Done** in `fe659cf`. Added as a `**Watchers:**` line in `CONF_PUT_DESCRIPTION`
+> **Done** in `1a22af2`. Added as a `**Watchers:**` line in `CONF_PUT_DESCRIPTION`
 > (`src/tools/atlassian.api.tool.ts`), next to the existing image-handling note. Note that the
 > round-trip editing note this doc pointed at lives in `CONF_GET_DESCRIPTION`, not the PUT one.
 > `README.md` was left unchanged - the nearby prose is generic to all three write tools.
