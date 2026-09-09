@@ -8,7 +8,11 @@ import {
 	RequestWithBodyArgsType,
 } from '../tools/atlassian.api.types.js';
 import { applyJqFilter, toOutputString } from '../utils/jq.util.js';
-import { preprocessStorageBody } from '../utils/confluence-storage.util.js';
+import {
+	preprocessStorageBody,
+	findUnresolvableAttachmentRefsInBody,
+} from '../utils/confluence-storage.util.js';
+import { createValidationError } from '../utils/error.util.js';
 
 /**
  * @namespace AtlassianApiController
@@ -60,19 +64,44 @@ async function handleRequest(
 ): Promise<ControllerResponse> {
 	const methodLogger = logger.forMethod(`handle${method}`);
 
+	methodLogger.debug(`Making ${method} request`, {
+		path: options.path,
+		...(options.body && { bodyKeys: Object.keys(options.body) }),
+	});
+
+	// For write operations, fix <img> tags that should be <ac:image> macros
+	// in storage format content (round-trip editing fix)
+	const isStorageWrite = method === 'PUT' || method === 'POST';
+	const body =
+		options.body && isStorageWrite
+			? preprocessStorageBody(options.body)
+			: options.body;
+
+	// Fail fast on attachment references Confluence can never resolve.
+	// Checked after the <img> conversion above so a src that decodes to a
+	// quote-bearing name is caught too: escaping it produces well-formed
+	// XML that is still a dangling reference.
+	//
+	// Deliberately outside the try below: handleControllerError reclassifies
+	// whatever it catches as an API error, and this is a client-side input
+	// error raised before any request is made.
+	if (body && isStorageWrite) {
+		const unresolvable = findUnresolvableAttachmentRefsInBody(body);
+		if (unresolvable.length > 0) {
+			const names = unresolvable
+				.map((ref) => `"${ref.filename}"`)
+				.join(', ');
+			throw createValidationError(
+				`Attachment reference cannot resolve: ${names}. Confluence stores an ` +
+					`attachment whose name contains a double quote under a percent-encoded ` +
+					`title (a"b.png is stored as a%22b.png), so no ri:filename value will ` +
+					`match it. Escaping the quote does not help — rename the attachment to ` +
+					`remove the double quote and reference the new name.`,
+			);
+		}
+	}
+
 	try {
-		methodLogger.debug(`Making ${method} request`, {
-			path: options.path,
-			...(options.body && { bodyKeys: Object.keys(options.body) }),
-		});
-
-		// For write operations, fix <img> tags that should be <ac:image> macros
-		// in storage format content (round-trip editing fix)
-		const body =
-			options.body && (method === 'PUT' || method === 'POST')
-				? preprocessStorageBody(options.body)
-				: options.body;
-
 		// Call the service layer (returns TransportResponse with data and rawResponsePath)
 		const response = await atlassianApiService.request<unknown>(
 			options.path,

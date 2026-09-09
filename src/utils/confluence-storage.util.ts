@@ -144,15 +144,8 @@ export function preprocessStorageBody(
 ): Record<string, unknown> {
 	if (!body) return body;
 
-	// Check for the standard Confluence v2 API page/blogpost body structure:
-	// { "body": { "representation": "storage", "value": "..." } }
-	const bodyField = body.body as Record<string, unknown> | undefined;
-	if (
-		bodyField &&
-		typeof bodyField === 'object' &&
-		bodyField.representation === 'storage' &&
-		typeof bodyField.value === 'string'
-	) {
+	const bodyField = getStorageBodyField(body);
+	if (bodyField) {
 		const original = bodyField.value as string;
 		const fixed = restoreAcImageMacros(original);
 		if (fixed !== original) {
@@ -161,4 +154,119 @@ export function preprocessStorageBody(
 	}
 
 	return body;
+}
+
+/**
+ * Return the `{ representation: "storage", value: "..." }` sub-object of a
+ * Confluence v2 page/blogpost request body, or null when the body is not
+ * storage format.
+ */
+function getStorageBodyField(
+	body: Record<string, unknown>,
+): Record<string, unknown> | null {
+	// Standard Confluence v2 API page/blogpost body structure:
+	// { "body": { "representation": "storage", "value": "..." } }
+	const bodyField = body.body as Record<string, unknown> | undefined;
+	if (
+		bodyField &&
+		typeof bodyField === 'object' &&
+		bodyField.representation === 'storage' &&
+		typeof bodyField.value === 'string'
+	) {
+		return bodyField;
+	}
+	return null;
+}
+
+/**
+ * A `<ri:attachment>` reference that Confluence can never resolve.
+ */
+export interface UnresolvableAttachmentRef {
+	/** The attachment name the caller meant, with quote entities decoded. */
+	filename: string;
+	/** How the broken reference presented in the outgoing body. */
+	kind: 'contains-quote' | 'truncated';
+}
+
+/**
+ * A well-formed `ri:filename` attribute: the closing quote is followed by
+ * whitespace, a self-closing slash, `>`, or the end of the body.
+ */
+const RI_FILENAME_WELLFORMED_RE =
+	/ri:filename\s*=\s*(?:"([^"]*)"|'([^']*)')(?=[\s/>]|$)/g;
+
+/**
+ * A `ri:filename` attribute cut short by an unescaped double quote: the
+ * closing quote is immediately followed by more of the intended filename and
+ * then a second quote, e.g. `ri:filename="a"b.png"`.
+ */
+const RI_FILENAME_TRUNCATED_RE = /ri:filename\s*=\s*"([^"]*)"([^\s/>][^"]*)"/g;
+
+/** Entity forms for a double quote that Confluence emits or accepts. */
+const QUOTE_ENTITY_RE = /&quot;|&#34;|&#x22;/gi;
+
+/**
+ * Find `<ri:attachment>` references in a storage format body that name an
+ * attachment Confluence can never resolve.
+ *
+ * An attachment whose name contains a double quote is stored by Confluence
+ * under a percent-encoded title (`a"b.png` is stored as `a%22b.png`), so no
+ * `ri:filename` value matches it — escaping the quote as `&quot;` produces
+ * well-formed XML that is still a dangling reference. Sending such a body
+ * succeeds with HTTP 200 and yields a silently broken image, which is why this
+ * is worth rejecting before the request rather than after.
+ *
+ * Scope, deliberately narrow:
+ * - This catches the truncation *input* (`ri:filename="a"b.png"`), not the
+ *   truncation *artifact*. Once Confluence has stored the cut-short form, the
+ *   page holds `ri:filename="a"` — well-formed, quote-free, and indistinguishable
+ *   from a real attachment named `a` without fetching the page's attachment
+ *   list. Detecting that would require a read before every write, which this
+ *   check deliberately avoids.
+ * - Numeric entity forms (`&#34;`, `&#x22;`) are decoded alongside `&quot;`.
+ * - Purely textual and stateless: no API call, no page state, no false
+ *   positives on names that merely contain spaces, parentheses or non-ASCII.
+ *
+ * @param storageValue - The storage format body to inspect
+ * @returns Every unresolvable reference found, de-duplicated by filename
+ */
+export function findUnresolvableAttachmentRefs(
+	storageValue: string,
+): UnresolvableAttachmentRef[] {
+	if (!storageValue || typeof storageValue !== 'string') return [];
+	if (!storageValue.includes('ri:filename')) return [];
+
+	const found = new Map<string, UnresolvableAttachmentRef>();
+
+	for (const m of storageValue.matchAll(RI_FILENAME_TRUNCATED_RE)) {
+		const filename = `${m[1]}"${m[2]}`;
+		if (!found.has(filename)) {
+			found.set(filename, { filename, kind: 'truncated' });
+		}
+	}
+
+	for (const m of storageValue.matchAll(RI_FILENAME_WELLFORMED_RE)) {
+		const decoded = (m[1] ?? m[2] ?? '').replace(QUOTE_ENTITY_RE, '"');
+		if (decoded.includes('"') && !found.has(decoded)) {
+			found.set(decoded, { filename: decoded, kind: 'contains-quote' });
+		}
+	}
+
+	return [...found.values()];
+}
+
+/**
+ * Apply {@link findUnresolvableAttachmentRefs} to a Confluence v2 request body.
+ * Non-storage bodies are ignored.
+ *
+ * @param body - The request body object
+ * @returns Every unresolvable reference found in its storage value
+ */
+export function findUnresolvableAttachmentRefsInBody(
+	body: Record<string, unknown>,
+): UnresolvableAttachmentRef[] {
+	if (!body) return [];
+	const bodyField = getStorageBodyField(body);
+	if (!bodyField) return [];
+	return findUnresolvableAttachmentRefs(bodyField.value as string);
 }

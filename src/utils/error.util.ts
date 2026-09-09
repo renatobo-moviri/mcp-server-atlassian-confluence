@@ -120,6 +120,21 @@ export function createNotFoundError(
 }
 
 /**
+ * Create a validation error for input rejected before any API call is made
+ */
+export function createValidationError(
+	message: string,
+	originalError?: unknown,
+): McpError {
+	return new McpError(
+		message,
+		ErrorType.VALIDATION_ERROR,
+		400,
+		originalError,
+	);
+}
+
+/**
  * Create an unexpected error
  */
 export function createUnexpectedError(

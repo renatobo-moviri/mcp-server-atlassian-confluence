@@ -2,6 +2,8 @@ import { describe, expect, test } from '@jest/globals';
 import {
 	restoreAcImageMacros,
 	preprocessStorageBody,
+	findUnresolvableAttachmentRefs,
+	findUnresolvableAttachmentRefsInBody,
 } from './confluence-storage.util.js';
 
 describe('confluence-storage.util', () => {
@@ -262,6 +264,129 @@ describe('confluence-storage.util', () => {
 			};
 			preprocessStorageBody(body);
 			expect((body.body as Record<string, unknown>).value).toBe(value);
+		});
+	});
+	describe('findUnresolvableAttachmentRefs', () => {
+		const names = (v: string) =>
+			findUnresolvableAttachmentRefs(v).map((r) => r.filename);
+
+		test('flags a filename cut short by an unescaped double quote', () => {
+			const input =
+				'<p><ac:image><ri:attachment ri:filename="a"b.png"/></ac:image></p>';
+			expect(findUnresolvableAttachmentRefs(input)).toEqual([
+				{ filename: 'a"b.png', kind: 'truncated' },
+			]);
+		});
+
+		test('flags a quote escaped as &quot;', () => {
+			const input =
+				'<p><ac:image><ri:attachment ri:filename="a&quot;b.png"/></ac:image></p>';
+			expect(findUnresolvableAttachmentRefs(input)).toEqual([
+				{ filename: 'a"b.png', kind: 'contains-quote' },
+			]);
+		});
+
+		test('flags the numeric entity forms &#34; and &#x22;', () => {
+			expect(names('<ri:attachment ri:filename="a&#34;b.png"/>')).toEqual(
+				['a"b.png'],
+			);
+			expect(
+				names('<ri:attachment ri:filename="c&#x22;d.png"/>'),
+			).toEqual(['c"d.png']);
+		});
+
+		test('flags a raw quote inside a single-quoted attribute', () => {
+			expect(names(`<ri:attachment ri:filename='a"b.png'/>`)).toEqual([
+				'a"b.png',
+			]);
+		});
+
+		test('flags only the bad reference when several are present', () => {
+			const input =
+				'<ri:attachment ri:filename="good.png"/>' +
+				'<ri:attachment ri:filename="a&quot;b.png"/>' +
+				'<ri:attachment ri:filename="also good.png"/>';
+			expect(names(input)).toEqual(['a"b.png']);
+		});
+
+		test('de-duplicates a filename referenced twice', () => {
+			const input =
+				'<ri:attachment ri:filename="a&quot;b.png"/>' +
+				'<ri:attachment ri:filename="a&quot;b.png"/>';
+			expect(names(input)).toEqual(['a"b.png']);
+		});
+
+		test('accepts names that are merely awkward', () => {
+			for (const name of [
+				'my file (1).png',
+				'café.png',
+				'a&amp;b.png',
+				'x&lt;y&gt;.png',
+				'it&apos;s.png',
+			]) {
+				expect(names(`<ri:attachment ri:filename="${name}"/>`)).toEqual(
+					[],
+				);
+			}
+		});
+
+		test('accepts well-formed closings: /> and > and a following attribute', () => {
+			expect(names('<ri:attachment ri:filename="a.png"/>')).toEqual([]);
+			expect(
+				names('<ri:attachment ri:filename="a.png"></ri:attachment>'),
+			).toEqual([]);
+			expect(
+				names('<ri:attachment ri:filename="a.png" ri:version="1"/>'),
+			).toEqual([]);
+		});
+
+		test('returns nothing for bodies with no attachment reference', () => {
+			expect(findUnresolvableAttachmentRefs('<p>hello</p>')).toEqual([]);
+			expect(findUnresolvableAttachmentRefs('')).toEqual([]);
+			expect(
+				findUnresolvableAttachmentRefs(null as unknown as string),
+			).toEqual([]);
+		});
+
+		test('catches an img src whose encoded name decodes to a quote', () => {
+			// escapeXmlAttr makes this well-formed, but it still cannot resolve
+			const converted = restoreAcImageMacros(
+				'<p><img src="/wiki/download/attachments/1/a%22b.png"/></p>',
+			);
+			expect(converted).toContain('ri:filename="a&quot;b.png"');
+			expect(names(converted)).toEqual(['a"b.png']);
+		});
+	});
+
+	describe('findUnresolvableAttachmentRefsInBody', () => {
+		test('inspects a storage body', () => {
+			const body = {
+				body: {
+					representation: 'storage',
+					value: '<ri:attachment ri:filename="a&quot;b.png"/>',
+				},
+			};
+			expect(
+				findUnresolvableAttachmentRefsInBody(body).map(
+					(r) => r.filename,
+				),
+			).toEqual(['a"b.png']);
+		});
+
+		test('ignores a non-storage body', () => {
+			const body = {
+				body: {
+					representation: 'atlas_doc_format',
+					value: '<ri:attachment ri:filename="a&quot;b.png"/>',
+				},
+			};
+			expect(findUnresolvableAttachmentRefsInBody(body)).toEqual([]);
+		});
+
+		test('ignores a body with no body field', () => {
+			expect(
+				findUnresolvableAttachmentRefsInBody({ title: 'x' }),
+			).toEqual([]);
 		});
 	});
 });
