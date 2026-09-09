@@ -124,6 +124,74 @@ describe('confluence-storage.util', () => {
 				'<ac:image ac:width="300"><ri:attachment ri:filename="file.png"/></ac:image>';
 			expect(restoreAcImageMacros(input)).toBe(expected);
 		});
+
+		test('escapes an ampersand decoded from the filename', () => {
+			const input =
+				'<img src="https://site.atlassian.net/wiki/download/attachments/1/Q%26A.png"/>';
+			const expected =
+				'<ac:image><ri:attachment ri:filename="Q&amp;A.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('escapes a double quote decoded from the filename', () => {
+			const input =
+				'<img src="https://site.atlassian.net/wiki/download/attachments/1/a%22b.png"/>';
+			const expected =
+				'<ac:image><ri:attachment ri:filename="a&quot;b.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('escapes angle brackets decoded from the filename', () => {
+			const input =
+				'<img src="https://site.atlassian.net/wiki/download/attachments/1/x%3Cy%3E.png"/>';
+			const expected =
+				'<ac:image><ri:attachment ri:filename="x&lt;y&gt;.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('escapes a literal (unencoded) ampersand in the filename exactly once', () => {
+			const input =
+				'<img src="https://site.atlassian.net/wiki/download/attachments/1/Q&A.png"/>';
+			const expected =
+				'<ac:image><ri:attachment ri:filename="Q&amp;A.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('escapes a quote in a single-quoted width attribute', () => {
+			const input =
+				'<img src="https://site.atlassian.net/wiki/download/attachments/1/file.png" width=\'10"\'/>';
+			const expected =
+				'<ac:image ac:width="10&quot;"><ri:attachment ri:filename="file.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('leaves the <img> tag untouched when the filename is a malformed percent-encoded sequence', () => {
+			const input =
+				'<img src="https://site.atlassian.net/wiki/download/attachments/1/%E0%A4%A.png"/>';
+			expect(restoreAcImageMacros(input)).toBe(input);
+		});
+
+		test('converts the no-space self-closing form (regression: trailing slash previously captured into the filename)', () => {
+			const input = '<img src=/wiki/download/attachments/1/a.png/>';
+			const expected =
+				'<ac:image><ri:attachment ri:filename="a.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('converts the space-before-slash self-closing form (guards the already-working case)', () => {
+			const input = '<img src=/wiki/download/attachments/1/a.png />';
+			const expected =
+				'<ac:image><ri:attachment ri:filename="a.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
+
+		test('handles an unquoted width value before a no-space self-closing slash', () => {
+			const input =
+				'<img src=/wiki/download/attachments/1/a.png width=300/>';
+			const expected =
+				'<ac:image ac:width="300"><ri:attachment ri:filename="a.png"/></ac:image>';
+			expect(restoreAcImageMacros(input)).toBe(expected);
+		});
 	});
 
 	describe('preprocessStorageBody', () => {
