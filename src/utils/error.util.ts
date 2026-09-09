@@ -197,7 +197,7 @@ export function formatErrorForMcpTool(error: unknown): {
 
 	// Add Confluence-specific error handling for display
 	if (originalError) {
-		let vendorText = '';
+		let vendorText: string;
 		if (originalError instanceof Error) {
 			vendorText = originalError.message;
 		} else if (typeof originalError === 'object') {
@@ -338,7 +338,7 @@ export function handleCliError(error: unknown): never {
 	const deepOriginal = getDeepOriginalError(mcpError.originalError);
 	if (deepOriginal) {
 		cliLines.push('Confluence API Error:');
-		let vendorText = '';
+		let vendorText: string;
 		if (deepOriginal instanceof Error) {
 			vendorText = deepOriginal.message;
 		} else if (typeof deepOriginal === 'object') {
