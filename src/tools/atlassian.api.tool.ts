@@ -248,6 +248,8 @@ Note: PUT replaces entire resource. Version number must be incremented.
 
 **Image handling:** When updating with \`representation: "storage"\`, any \`<img>\` tags pointing to Confluence attachment URLs are automatically converted back to \`<ac:image>\` macros for correct rendering.
 
+**Watchers:** watcher notification cannot be suppressed through the API; \`version.minorEdit\` is accepted in the body and echoed back but ignored by Confluence Cloud, and there is no \`notifyWatchers\` parameter.
+
 API reference: https://developer.atlassian.com/cloud/confluence/rest/v2/`;
 
 const CONF_PATCH_DESCRIPTION = `Partially update Confluence resources. Returns TOON format by default.
