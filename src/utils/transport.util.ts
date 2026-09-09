@@ -104,9 +104,16 @@ export async function fetchAtlassian<T>(
 	};
 
 	// For multipart bodies, drop any Content-Type (including a caller-supplied
-	// one) so fetch can inject the correct multipart boundary.
+	// one) so fetch can inject the correct multipart boundary. HTTP header
+	// names are case-insensitive, so match on the lowercased key rather than
+	// the exact spelling - a caller passing `content-type` would otherwise
+	// survive the spread above and clobber the boundary.
 	if (isFormData) {
-		delete headers['Content-Type'];
+		for (const key of Object.keys(headers)) {
+			if (key.toLowerCase() === 'content-type') {
+				delete headers[key];
+			}
+		}
 	}
 
 	// Prepare request options
