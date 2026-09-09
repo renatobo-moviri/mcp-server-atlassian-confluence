@@ -1,9 +1,8 @@
 # Field notes: the write path
 
 **Date:** 2026-09-09
-**Source:** a documentation session that made ~15 storage-format page writes against the
-`uxenginelatest` space on `contentwise.atlassian.net` (tables, `<ac:image>` embeds,
-`<ac:structured-macro>` panels). Reads went through `conf_get` and were trouble-free; every
+**Source:** a documentation session that made ~15 storage-format page writes against an
+internal Confluence Cloud space (tables, `<ac:image>` embeds, `<ac:structured-macro>` panels). Reads went through `conf_get` and were trouble-free; every
 point below is about `conf_post` / `conf_put` / `conf_patch`.
 
 Nothing here has been filed upstream. Point 1 looks upstream-worthy
@@ -140,10 +139,83 @@ Opt-in would be safest, since a legitimate delete is a normal edit.
 
 ---
 
+## 3 (decided). Split it: build the format lint, skip the diff-against-live check
+
+Answering the open design question, 2026-09-09, after the escaping measurements in point 4.
+
+**The line I would draw: the server enforces format, the caller enforces intent.** A general
+server should make *malformed* writes impossible and leave *unwise* writes to whoever knows what
+the edit was for. That splits the original proposal in two, and the two halves land on opposite
+sides of the line.
+
+### Worth building: a lint for a raw `"` inside an `ri:filename` already in the outgoing body
+
+Not redundant with the escaping fix, though the overlap is easy to assume. `escapeXmlAttr` is
+reached only from `convertImgToAcImage`, i.e. only for filenames the server *reconstructs* from an
+`<img>` tag pointing at a Confluence attachment URL. `preprocessStorageBody` never inspects an
+`<ri:attachment>` that the caller wrote itself. So this body:
+
+```xml
+<ac:image><ri:attachment ri:filename="a"b.png"/></ac:image>
+```
+
+passes through untouched today and hits the truncation in point 4's table: HTTP 200,
+`ri:filename="a"`, reference destroyed, no signal. For a server whose callers are language models
+hand-writing storage XML, that is the realistic path to the failure, not the `<img>` path that is
+already covered.
+
+Scope it to exactly that gap: scan the outgoing body for `ri:filename="…"` values containing a raw
+`"`, and reject with a message naming the filename. Stateless, no extra API call, and there is no
+legitimate unescaped double quote inside a double-quoted attribute, so a false positive is not
+reachable on a well-formed body.
+
+**Frame it as fail-fast, not as corruption-prevention.** Point 4 establishes that Confluence stores
+a quote-bearing attachment under the percent-encoded title `a%22b.png`, so the reference does not
+resolve even when the XML is correct. Escaping is necessary and insufficient. The honest value of
+the lint is that it turns a name that can never work into a loud error at write time instead of a
+silently broken image discovered weeks later.
+
+### Not worth building: comparing macro and attachment counts against the live page
+
+This is the half I originally proposed, and I now think it does not belong in this server.
+
+1. **It makes a write tool secretly a read tool.** The check needs a GET before every PUT: double
+   the requests, added latency, and a surprising interaction with rate limits.
+2. **"Loss" is an intent judgment, not a correctness one.** Deleting an image is an ordinary edit.
+   The check is therefore only usable with an override, and the caller has to know its own intent
+   to set the override, at which point the caller is the right place for the whole check.
+3. **Counts are a crude proxy.** They cannot separate a deliberate removal from an accidental one,
+   and they miss the case that actually bites: a body whose counts match but whose elements were
+   swapped.
+4. **An escape hatch that is always available gets passed reflexively.** Our own helper has
+   `--allow-loss`, and what keeps it honest is a written rule never to use it, not the flag.
+   Shipping that dynamic to every consumer of a general server makes the guard decorative.
+
+### Cheaper and better than either: one sentence in `CONF_PUT_DESCRIPTION`
+
+The root cause is that callers do not know `conf_put` replaces the whole body. Say so where they
+will read it, next to the watcher line that just went in:
+
+> Replaces the entire page body. Any `<ac:image>`, `<ri:attachment>` or `<ac:structured-macro>`
+> present on the live page and absent from this body is deleted, with a 200 and no warning. Fetch
+> the current body with `conf_get` and edit that, rather than composing a body from scratch.
+
+Zero runtime cost, no false positives, and it addresses the actual failure, which is a caller who
+did not know the semantics rather than a caller who knew and slipped.
+
+### What stays on our side
+
+The count-diff guard remains in the caller (`scripts/conf_page.py` in the documentation repo),
+along with the space-specific rules that were already excluded from this proposal. That is the
+right home for it: it knows the editorial intent of each edit, and it is used by one team that can
+hold a convention about the override flag.
+
+---
+
 ## 4. What unescaped `ri:filename` actually does (measured, not predicted)
 
 A code review claimed that an unescaped `&` in `ri:filename` produces malformed storage XML and
-a 400 on write. **That is wrong.** Measured 2026-09-09 against `contentwise.atlassian.net`, on a
+a 400 on write. **That is wrong.** Measured 2026-09-09 against Confluence Cloud, on a
 scratch page in a personal space, with real attachments uploaded and the page deleted afterwards:
 
 | Filename char | Unescaped (pre-fix output) | Escaped (post-fix output) |
