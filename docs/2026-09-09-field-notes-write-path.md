@@ -22,10 +22,10 @@ is deliberately deferred. Still nothing filed upstream. See the per-point status
 
 One bug not in these notes was found while implementing them and fixed in the same branch
 (`3969ef6`): `convertImgToAcImage` interpolated the attachment filename into `ri:filename="..."`
-without XML escaping, so an attachment named `Q&A.png` produced malformed storage XML and the
-write failed with a 400. The same commit wraps `decodeURIComponent` against malformed percent
+without XML escaping. The same commit wraps `decodeURIComponent` against malformed percent
 sequences and stops `IMG_TAG_RE` swallowing a self-closing slash into the last unquoted
-attribute.
+attribute. See point 4 below for what that unescaped output actually does against the live API -
+it is **not** the 400 the code review predicted.
 
 ---
 
@@ -137,3 +137,36 @@ space-ID assumptions. Those are house style for one space and do not belong in a
 server.
 
 Opt-in would be safest, since a legitimate delete is a normal edit.
+
+---
+
+## 4. What unescaped `ri:filename` actually does (measured, not predicted)
+
+A code review claimed that an unescaped `&` in `ri:filename` produces malformed storage XML and
+a 400 on write. **That is wrong.** Measured 2026-09-09 against `contentwise.atlassian.net`, on a
+scratch page in a personal space, with real attachments uploaded and the page deleted afterwards:
+
+| Filename char | Unescaped (pre-fix output) | Escaped (post-fix output) |
+|---|---|---|
+| `&` in `Q&A.png` | HTTP 200, stored as `Q&amp;A.png`, image resolves | HTTP 200, byte-identical stored result |
+| `<` `>` in `x<y>.png` | HTTP 200, stored as `x&lt;y&gt;.png`, image resolves | HTTP 200, byte-identical stored result |
+| `"` in `a"b.png` | HTTP 200, **silently truncated to `ri:filename="a"`** - reference destroyed | HTTP 200, `a&quot;b.png` preserved |
+
+The storage-format parser is lenient: it repairs a bare `&`, `<` or `>` in an attribute value on
+ingest, so for those characters the pre-fix and post-fix bodies are stored identically and there
+was never a 400. The double quote is the real defect, and it fails in the worse direction - a
+200 with the filename silently cut at the quote, which is the same class of silent-loss footgun
+as point 3.
+
+Two further observations from the same run:
+
+- Confluence stores an attachment whose name contains `"` under the percent-encoded title
+  `a%22b.png`, so a `ri:filename="a&quot;b.png"` reference does not resolve to it even when the
+  XML is correct. Escaping is necessary but not sufficient for quote-bearing names.
+- The `decodeURIComponent` hardening in the same commit is unrelated to Confluence's leniency: a
+  malformed percent sequence threw a `URIError` client-side and aborted the whole conversion
+  pass before any request was made. That one was a genuine crash.
+
+**Net:** the escaping fix is correct and worth keeping - it stops relying on a lenient parser and
+prevents the `"` truncation - but its severity was overstated. It is hygiene plus one real
+silent-corruption case, not a fix for failing writes.
