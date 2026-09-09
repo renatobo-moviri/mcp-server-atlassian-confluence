@@ -250,6 +250,8 @@ Note: PUT replaces entire resource. Version number must be incremented.
 
 **Watchers:** watcher notification cannot be suppressed through the API; \`version.minorEdit\` is accepted in the body and echoed back but ignored by Confluence Cloud, and there is no \`notifyWatchers\` parameter.
 
+**Whole-body replacement:** Replaces the entire page body. Any \`<ac:image>\`, \`<ri:attachment>\` or \`<ac:structured-macro>\` present on the live page and absent from this body is deleted, with a 200 and no warning. Fetch the current body with \`conf_get\` and edit that, rather than composing a body from scratch.
+
 API reference: https://developer.atlassian.com/cloud/confluence/rest/v2/`;
 
 const CONF_PATCH_DESCRIPTION = `Partially update Confluence resources. Returns TOON format by default.
