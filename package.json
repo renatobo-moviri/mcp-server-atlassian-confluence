@@ -17,10 +17,10 @@
     "prepare": "npm run build && node scripts/ensure-executable.js",
     "postinstall": "node scripts/ensure-executable.js",
     "clean": "rm -rf dist coverage",
-    "test": "jest",
-    "test:quiet": "jest --silent",
-    "test:coverage": "jest --coverage",
-    "test:cli": "jest src/cli/.*\\.cli\\.test\\.ts --runInBand --testTimeout=60000",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:quiet": "NODE_OPTIONS=--experimental-vm-modules jest --silent",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+    "test:cli": "NODE_OPTIONS=--experimental-vm-modules jest src/cli/.*\\.cli\\.test\\.ts --runInBand --testTimeout=60000",
     "lint": "eslint src --ext .ts --config eslint.config.mjs",
     "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.js'",
     "publish:npm": "npm publish",
@@ -135,7 +135,11 @@
       "^.+\\.tsx?$": [
         "ts-jest",
         {
-          "useESM": true
+          "useESM": true,
+          "tsconfig": {
+            "module": "ESNext",
+            "moduleResolution": "Bundler"
+          }
         }
       ]
     },

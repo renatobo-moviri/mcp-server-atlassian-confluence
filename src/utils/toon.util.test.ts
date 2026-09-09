@@ -1,18 +1,30 @@
 import { describe, expect, test } from '@jest/globals';
-import { toToonOrJson, toToonOrJsonSync } from './toon.util.js';
+import {
+	toToonOrJson,
+	toToonOrJsonSync,
+	preloadToonEncoder,
+} from './toon.util.js';
 
 /**
- * NOTE: The TOON encoder (@toon-format/toon) is an ESM-only package.
- * In Jest's CommonJS test environment, dynamic imports may not work,
- * causing TOON conversion to fall back to JSON. These tests verify:
- * 1. The fallback mechanism works correctly
- * 2. Functions return valid output (either TOON or JSON fallback)
- * 3. Error handling is robust
+ * NOTE: The TOON encoder (@toon-format/toon) is an ESM-only package, loaded
+ * through a dynamic import. This suite therefore runs as ESM (jest's
+ * --experimental-vm-modules, wired into the npm test scripts); under the
+ * previous CommonJS setup the import failed and every assertion here silently
+ * checked the JSON fallback instead of TOON output.
  *
- * TOON conversion is verified at runtime via CLI/integration tests.
+ * These tests cover both paths deliberately: the fallback contract, and the
+ * real encoder output including v4's tabular form for uniform object arrays.
  */
 
 describe('TOON Utilities', () => {
+	// The encoder is an ESM-only dynamic import. If it ever stops loading, every
+	// assertion below silently degrades to checking the JSON fallback instead of
+	// TOON output - which is exactly what happened under the old CommonJS setup.
+	// Fail loudly here rather than passing vacuously everywhere else.
+	test('the TOON encoder actually loads in this environment', async () => {
+		await expect(preloadToonEncoder()).resolves.toBe(true);
+	});
+
 	describe('toToonOrJson', () => {
 		test('returns valid output for simple object', async () => {
 			const data = { name: 'Alice', age: 30 };
@@ -169,20 +181,11 @@ describe('TOON Utilities', () => {
 		});
 	});
 
-	// NOTE: @toon-format/toon is ESM-only (no CJS build, exports "." -> index.mjs).
-	// This suite runs under ts-jest in CommonJS, where `await import()` is
-	// transpiled to require() and therefore fails, so loadToonEncoder() always
-	// returns null here and every test above exercises the JSON fallback path
-	// rather than TOON output. Enabling jest's ESM mode
-	// (NODE_OPTIONS=--experimental-vm-modules, which the config is already
-	// shaped for) currently fails all 8 suites, so it is a migration rather
-	// than a flag flip.
-	//
-	// The assertions below are the real contract of the v4 encoder, verified
-	// by hand against the built output under plain node. They are skipped
-	// because they cannot pass in this environment; un-skip them with the ESM
-	// migration.
-	describe.skip('tabular encoding of uniform object arrays', () => {
+	// @toon-format/toon is ESM-only (no CJS build). These assertions cover the
+	// v4 tabular contract and only run because this suite executes as ESM; under
+	// the previous CommonJS setup the dynamic import failed and every test above
+	// silently exercised the JSON fallback instead of TOON output.
+	describe('tabular encoding of uniform object arrays', () => {
 		const pages = (n: number) => ({
 			results: Array.from({ length: n }, (_, i) => ({
 				id: `${400000 + i}`,
