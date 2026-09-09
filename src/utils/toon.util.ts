@@ -5,7 +5,7 @@ const logger = Logger.forContext('utils/toon.util.ts');
 /**
  * TOON encode function type (dynamically imported)
  */
-type ToonEncode = (input: unknown, options?: { indent?: number }) => string;
+type ToonEncode = (input: unknown, options?: { indentSize?: number }) => string;
 
 /**
  * Cached TOON encode function
@@ -37,6 +37,11 @@ async function loadToonEncoder(): Promise<ToonEncode | null> {
  * Attempts to encode data as TOON (Token-Oriented Object Notation) for
  * more efficient LLM token usage. Falls back to JSON if TOON encoding fails.
  *
+ * Uniform arrays of objects are emitted in TOON's tabular form - a single
+ * field header followed by one delimited row per element - which is roughly
+ * half the size of the per-field form for list responses. Non-uniform arrays
+ * fall back to the per-field form automatically.
+ *
  * @param data - The data to convert
  * @param jsonFallback - The JSON string to return if TOON conversion fails
  * @returns TOON formatted string, or JSON fallback on error
@@ -60,7 +65,7 @@ export async function toToonOrJson(
 			return jsonFallback;
 		}
 
-		const toonResult = encode(data, { indent: 2 });
+		const toonResult = encode(data, { indentSize: 2 });
 		methodLogger.debug('Successfully converted to TOON format');
 		return toonResult;
 	} catch (error) {
@@ -91,7 +96,7 @@ export function toToonOrJsonSync(data: unknown, jsonFallback: string): string {
 	}
 
 	try {
-		const toonResult = toonEncode(data, { indent: 2 });
+		const toonResult = toonEncode(data, { indentSize: 2 });
 		methodLogger.debug('Successfully converted to TOON format');
 		return toonResult;
 	} catch (error) {

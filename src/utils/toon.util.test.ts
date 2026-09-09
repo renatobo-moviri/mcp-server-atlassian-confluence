@@ -168,4 +168,62 @@ describe('TOON Utilities', () => {
 			}
 		});
 	});
+
+	// NOTE: @toon-format/toon is ESM-only (no CJS build, exports "." -> index.mjs).
+	// This suite runs under ts-jest in CommonJS, where `await import()` is
+	// transpiled to require() and therefore fails, so loadToonEncoder() always
+	// returns null here and every test above exercises the JSON fallback path
+	// rather than TOON output. Enabling jest's ESM mode
+	// (NODE_OPTIONS=--experimental-vm-modules, which the config is already
+	// shaped for) currently fails all 8 suites, so it is a migration rather
+	// than a flag flip.
+	//
+	// The assertions below are the real contract of the v4 encoder, verified
+	// by hand against the built output under plain node. They are skipped
+	// because they cannot pass in this environment; un-skip them with the ESM
+	// migration.
+	describe.skip('tabular encoding of uniform object arrays', () => {
+		const pages = (n: number) => ({
+			results: Array.from({ length: n }, (_, i) => ({
+				id: `${400000 + i}`,
+				title: `Page ${i}`,
+				status: 'current',
+			})),
+		});
+
+		test('emits a field header and one row per element', async () => {
+			const data = pages(2);
+			const result = await toToonOrJson(
+				data,
+				JSON.stringify(data, null, 2),
+			);
+
+			expect(result).toContain('results[2]{id,title,status}:');
+			expect(result).toContain('"400000",Page 0,current');
+		});
+
+		test('is materially smaller than the JSON it replaces', async () => {
+			const data = pages(25);
+			const jsonFallback = JSON.stringify(data, null, 2);
+			const result = await toToonOrJson(data, jsonFallback);
+
+			expect(result.length).toBeLessThan(jsonFallback.length * 0.6);
+		});
+
+		test('falls back to the per-field form for non-uniform arrays', async () => {
+			const data = {
+				results: [
+					{ id: '1', title: 'A' },
+					{ id: '2', spaceId: '3' },
+				],
+			};
+			const result = await toToonOrJson(
+				data,
+				JSON.stringify(data, null, 2),
+			);
+
+			expect(result).toContain('results[2]:');
+			expect(result).not.toContain('results[2]{');
+		});
+	});
 });
