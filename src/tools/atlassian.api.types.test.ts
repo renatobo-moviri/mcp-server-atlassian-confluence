@@ -78,9 +78,13 @@ describe('atlassian.api.types', () => {
 		});
 
 		test('advertised (input) JSON schema still describes body as an object', () => {
+			// zod >=4.5 returns a generic ZodStandardJSONSchemaPayload whose
+			// `properties` is Record<string, JSONSchema>, so a direct cast to
+			// the narrowed shape no longer overlaps; the runtime assertion
+			// below is what this test actually guards.
 			const schema = z.toJSONSchema(RequestWithBodyArgs, {
 				io: 'input',
-			}) as {
+			}) as unknown as {
 				properties: { body: { type: string } };
 			};
 			expect(schema.properties.body.type).toBe('object');
