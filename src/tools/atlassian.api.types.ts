@@ -62,12 +62,26 @@ const BaseApiToolArgs = {
 };
 
 /**
- * Body field for requests that include a request body (POST, PUT, PATCH)
+ * Body field for requests that include a request body (POST, PUT, PATCH).
+ * Accepts either a plain object or a JSON-encoded string (some clients
+ * serialize large request bodies to a string); a string is parsed with
+ * `JSON.parse` before validation, falling through to the record-shape
+ * error below if parsing fails.
  */
 const bodyField = z
-	.record(z.string(), z.unknown())
+	.preprocess(
+		(v) => {
+			if (typeof v !== 'string') return v;
+			try {
+				return JSON.parse(v);
+			} catch {
+				return v; // fall through to the record error below
+			}
+		},
+		z.record(z.string(), z.unknown()),
+	)
 	.describe(
-		'Request body as a JSON object. Structure depends on the endpoint. Example for page: {"spaceId": "123", "title": "Page Title", "body": {"representation": "storage", "value": "<p>Content</p>"}}',
+		'Request body as a JSON object. Structure depends on the endpoint. Example for page: {"spaceId": "123", "title": "Page Title", "body": {"representation": "storage", "value": "<p>Content</p>"}} (a JSON-encoded string is also accepted).',
 	);
 
 /**

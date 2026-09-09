@@ -21,9 +21,7 @@ indexLogger.debug('Confluence MCP server module loaded');
 
 let serverInstance: McpServer | null = null;
 let transportInstance:
-	| StreamableHTTPServerTransport
-	| StdioServerTransport
-	| null = null;
+	StreamableHTTPServerTransport | StdioServerTransport | null = null;
 
 /**
  * Start the MCP server with the specified transport mode

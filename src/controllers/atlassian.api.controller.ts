@@ -201,8 +201,7 @@ export async function handleAttach(
 			result = applyJqFilter({ ...attachment, status }, options.jq);
 		} else {
 			const extensions = attachment.extensions as
-				| Record<string, unknown>
-				| undefined;
+				Record<string, unknown> | undefined;
 			result = {
 				id: attachment.id,
 				title: attachment.title,
